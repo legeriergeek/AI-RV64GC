@@ -2,7 +2,8 @@
 An RV64GC emulator coded by **AI** (i don't revendicate anything over this, this is not my creation) with Internet support.
 ## In bulk trivia:
 It boots the linux kernel (yay!), and can connect to the internet and do things such as `apk update`, or host an SSH server. The "distro" provided with the VM is Alpine Linux (latest version on the time of writing)\
-On my machine (i3-10100f), it can do approximately 80 to 90 MIPS.
+On my machine (i3-10100f), it can do approximately 80 to 90 MIPS.\
+It hides itself as qemu for compatibility's sake, but this has nothing to do with qemu.
 ### Realised by `Claude Opus 4.6`, `Claude Sonnet 4.6`, `Gemini 3.1 Pro`, `Gemini 3 Flash`. 
 ## How to use:
 ### THIS IS MADE FOR LINUX **ONLY**
