@@ -10,7 +10,7 @@ On my machine (i3-10100f), it can do approximately 80 to 90 MIPS.
 * Once that's done, you can either build your own kernel (DON'T DO THAT FOR YOUR SANITY), or download the one provided in the downloads tab (under the name kernel.bin)
 * Now you can download the disk (disk.img, in the release tab)
 * and then you just have to run `./riscv-emu -d disk.img kernel.bin`
-* if you want to have internet support (the host HAS to be linux, again), modify the ./network-host.sh script (you can find it in the root of the repo) to replace `ens6p0` by the name of your network adapter, then run the script on your computer (**QUICK REMINDER: ALWAYS READ SCRIPTS BEFORE EXECUTING THEM**), and then run the command: `./riscv-emu -d disk.img -t tap0 kernel.bin`
+* if you want to have internet support (the host HAS to be linux, again), modify the `./network_host.sh` script (you can find it in the root of the repo) to replace `ens6p0` by the name of your network adapter, then run the script on your computer (**QUICK REMINDER: ALWAYS READ SCRIPTS BEFORE EXECUTING THEM**), and then run the command: `./riscv-emu -d disk.img -t tap0 kernel.bin`
 * Once you're in the VM, run the script `setup.sh`, which is in the root folder.
 * And you should be all set!
 ## Disclaimer
