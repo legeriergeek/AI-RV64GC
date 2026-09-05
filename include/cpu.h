@@ -5,6 +5,10 @@
 #include "bus.h"
 #include "mmu.h"
 
+/* Direct-mapped data TLB entry: permissions are validated at fill time,
+ * so a hit only needs the tag compare plus one host load. */
+typedef struct { u64 tag; u8 *addend; } dtlb_ent_t;
+
 typedef struct cpu {
     /* Integer registers */
     u64 regs[32];
@@ -42,6 +46,13 @@ typedef struct cpu {
     u64  icache_vpn;
     u8  *icache_host_ptr;
     bool icache_valid;
+
+    /* Direct-mapped data TLB: host-pointer addends with permissions folded
+     * in at fill time. Entry = { tag = vaddr >> 12, addend }, where
+     * `host = addend + vaddr`. addend NULL = miss (mmu_translate refills).
+     * Flushed on any mmu_state change, satp write, sfence.vma. */
+    dtlb_ent_t dtlb_load[TLB_SIZE];
+    dtlb_ent_t dtlb_store[TLB_SIZE];
 } cpu_t;
 
 /* Lifecycle */

@@ -3,6 +3,26 @@
 
 void mmu_tlb_flush(cpu_t *cpu) {
     memset(cpu->tlb, 0, sizeof(cpu->tlb));
+    memset(cpu->dtlb_load, 0, sizeof(cpu->dtlb_load));
+    memset(cpu->dtlb_store, 0, sizeof(cpu->dtlb_store));
+}
+
+/* Fill the fast data TLB for a successfully translated page.
+ * Only DRAM-resident pages are cached (MMIO must always go through the
+ * bus), and only when the whole 4 KiB page plus 8 slack bytes is inside
+ * DRAM so a page-crossing access can never run past the buffer. */
+static inline void dtlb_fill(cpu_t *cpu, u64 vaddr, u64 pa, access_type_t access) {
+    if (pa < DRAM_BASE || pa - DRAM_BASE > DRAM_SIZE - 0x1000 - 8) return;
+    /* addend satisfies: addend + vaddr == &dram.mem[pa - DRAM_BASE] */
+    u8 *addend = cpu->bus.dram.mem + (pa & ~0xFFFULL) - DRAM_BASE - (vaddr & ~0xFFFULL);
+    u32 idx = (vaddr >> 12) & (TLB_SIZE - 1);
+    if (access == ACCESS_STORE) {
+        cpu->dtlb_store[idx].addend = addend;
+        cpu->dtlb_store[idx].tag    = vaddr >> 12;
+    } else if (access == ACCESS_LOAD) {
+        cpu->dtlb_load[idx].addend  = addend;
+        cpu->dtlb_load[idx].tag     = vaddr >> 12;
+    }
 }
 
 mmu_result_t mmu_translate(cpu_t *cpu, u64 vaddr, access_type_t access) {
@@ -20,6 +40,7 @@ mmu_result_t mmu_translate(cpu_t *cpu, u64 vaddr, access_type_t access) {
         if (vaddr >= DRAM_BASE && vaddr < DRAM_BASE + DRAM_SIZE) {
             hp = &cpu->bus.dram.mem[vaddr - DRAM_BASE];
         }
+        if (access != ACCESS_EXEC) dtlb_fill(cpu, vaddr, vaddr, access);
         return (mmu_result_t){ .paddr = vaddr, .host_ptr = hp, .exception = false };
     }
 
@@ -59,6 +80,7 @@ mmu_result_t mmu_translate(cpu_t *cpu, u64 vaddr, access_type_t access) {
             if (pa >= DRAM_BASE && pa < DRAM_BASE + DRAM_SIZE) {
                 hp = &cpu->bus.dram.mem[pa - DRAM_BASE];
             }
+            if (access != ACCESS_EXEC) dtlb_fill(cpu, vaddr, pa, access);
             return (mmu_result_t){ .paddr = pa, .host_ptr = hp, .exception = false };
         }
     }
@@ -140,8 +162,16 @@ mmu_result_t mmu_translate(cpu_t *cpu, u64 vaddr, access_type_t access) {
         hp = &cpu->bus.dram.mem[pa - DRAM_BASE];
     }
 
+    if (access != ACCESS_EXEC) dtlb_fill(cpu, vaddr, pa, access);
+
     return (mmu_result_t){ .paddr = pa, .host_ptr = hp, .exception = false };
 
 page_fault:
+    if (g_verbose) {
+        fprintf(stderr, "[mmu-dbg] pf va=%llx satp=%llx a=%llx pte_addr=%llx pte=%llx priv=%d\n",
+                (unsigned long long)vaddr, (unsigned long long)satp,
+                (unsigned long long)a, (unsigned long long)pte_addr,
+                (unsigned long long)pte, (int)priv);
+    }
     return (mmu_result_t){ .exception = true, .exc_code = (access == ACCESS_EXEC) ? EXC_INST_PAGE_FAULT : (access == ACCESS_LOAD) ? EXC_LOAD_PAGE_FAULT : EXC_STORE_PAGE_FAULT, .exc_val = vaddr };
 }

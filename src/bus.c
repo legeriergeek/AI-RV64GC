@@ -23,6 +23,20 @@ void bus_free(bus_t *bus) {
 load_result_t bus_load(bus_t *bus, u64 addr, int size) {
     load_result_t res = { .value = 0, .exception = false, .exc_code = 0, .exc_val = 0 };
 
+    /* DRAM first: by far the most common target (page-table walks, DMA
+     * helpers, any physical access). Device ranges are checked after. */
+    if (addr >= DRAM_BASE && addr < DRAM_BASE + DRAM_SIZE) {
+        u64 offset = addr - DRAM_BASE;
+        if (offset + size > bus->dram.size) {
+            res.exception = true;
+            res.exc_code = EXC_LOAD_ACCESS_FAULT;
+            res.exc_val = addr;
+            return res;
+        }
+        res.value = dram_load(&bus->dram, offset, size);
+        return res;
+    }
+
     /* ROM */
     if (addr >= ROM_BASE && addr < ROM_BASE + ROM_SIZE) {
         u64 offset = addr - ROM_BASE;
@@ -76,19 +90,6 @@ load_result_t bus_load(bus_t *bus, u64 addr, int size) {
         return res;
     }
 
-    /* DRAM */
-    if (addr >= DRAM_BASE && addr < DRAM_BASE + DRAM_SIZE) {
-        u64 offset = addr - DRAM_BASE;
-        if (offset + size > bus->dram.size) {
-            res.exception = true;
-            res.exc_code = EXC_LOAD_ACCESS_FAULT;
-            res.exc_val = addr;
-            return res;
-        }
-        res.value = dram_load(&bus->dram, offset, size);
-        return res;
-    }
-
     /* Access fault */
     res.exception = true;
     res.exc_code = EXC_LOAD_ACCESS_FAULT;
@@ -98,6 +99,19 @@ load_result_t bus_load(bus_t *bus, u64 addr, int size) {
 
 store_result_t bus_store(bus_t *bus, u64 addr, u64 value, int size, struct cpu *cpu) {
     store_result_t res = { .exception = false, .exc_code = 0, .exc_val = 0 };
+
+    /* DRAM first (most common target) */
+    if (addr >= DRAM_BASE && addr < DRAM_BASE + DRAM_SIZE) {
+        u64 offset = addr - DRAM_BASE;
+        if (offset + size > bus->dram.size) {
+            res.exception = true;
+            res.exc_code = EXC_STORE_ACCESS_FAULT;
+            res.exc_val = addr;
+            return res;
+        }
+        dram_store(&bus->dram, offset, value, size);
+        return res;
+    }
 
     /* ROM is read-only — silently ignore stores */
     if (addr >= ROM_BASE && addr < ROM_BASE + ROM_SIZE) {
@@ -150,19 +164,6 @@ store_result_t bus_store(bus_t *bus, u64 addr, u64 value, int size, struct cpu *
     /* Virtio RNG */
     if (addr >= VIRTRNG_BASE && addr < VIRTRNG_BASE + VIRTRNG_SIZE) {
         virtio_store(&bus->virtio_rng, addr - VIRTRNG_BASE, value, size, cpu);
-        return res;
-    }
-
-    /* DRAM */
-    if (addr >= DRAM_BASE && addr < DRAM_BASE + DRAM_SIZE) {
-        u64 offset = addr - DRAM_BASE;
-        if (offset + size > bus->dram.size) {
-            res.exception = true;
-            res.exc_code = EXC_STORE_ACCESS_FAULT;
-            res.exc_val = addr;
-            return res;
-        }
-        dram_store(&bus->dram, offset, value, size);
         return res;
     }
 

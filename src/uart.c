@@ -18,7 +18,7 @@ static void *uart_input_thread(void *arg) {
                 uart->regs[UART_LSR] |= LSR_DR;
                 /* If RX interrupt enabled, signal interrupt */
                 if (uart->regs[UART_IER] & IER_RDI) {
-                    uart->interrupting = true;
+                    __atomic_store_n(&uart->interrupting, true, __ATOMIC_RELAXED);
                 }
             }
             pthread_mutex_unlock(&uart->lock);
@@ -146,10 +146,14 @@ void uart_store(uart_t *uart, u64 offset, u64 value, int size) {
 }
 
 bool uart_is_interrupting(uart_t *uart) {
-    pthread_mutex_lock(&uart->lock);
+    /* Lock-free: the fields read here are u8/bool written by this thread
+     * (IER via guest stores, thre_ip via uart_store) or by the input
+     * thread under mutex (interrupting). Single-byte reads on x86 are
+     * atomic; taking the mutex every 256 instructions was measurable
+     * overhead in the periodic device poll. */
     bool r = false;
-    if ((uart->regs[UART_IER] & IER_RDI) && uart->interrupting) r = true;
+    if ((uart->regs[UART_IER] & IER_RDI) &&
+        __atomic_load_n(&uart->interrupting, __ATOMIC_RELAXED)) r = true;
     if ((uart->regs[UART_IER] & IER_THRI) && uart->thre_ip) r = true;
-    pthread_mutex_unlock(&uart->lock);
     return r;
 }

@@ -84,6 +84,10 @@ void cpu_update_mmu_state(cpu_t *cpu) {
     /* mmu_state: priv[0:1], mode[2:5], sum[6], mxr[7], mprv[8], mpp[9:10] */
     cpu->mmu_state = (u32)cpu->priv | (mode << 2) | (sum << 6) | (mxr << 7) | (mprv << 8) | (mpp << 9);
     cpu->icache_valid = false;
+    /* Permission context changed: data TLB entries were folded with the
+     * old priv/SUM/MXR/MPRV state, so drop them. */
+    memset(cpu->dtlb_load, 0, sizeof(cpu->dtlb_load));
+    memset(cpu->dtlb_store, 0, sizeof(cpu->dtlb_store));
 }
 
 void csr_write(cpu_t *cpu, u16 addr, u64 value) {
@@ -278,7 +282,25 @@ static inline mmu_result_t mmu_translate_inline(cpu_t *cpu, u64 vaddr, access_ty
 }
 
 load_result_t cpu_load(cpu_t *cpu, u64 addr, int size) {
-    mmu_result_t tr = mmu_translate_inline(cpu, addr, ACCESS_LOAD);
+    /* Fast path: direct-mapped data TLB. Permissions (priv/SUM/MXR/U/R/W/X/A)
+     * were validated at fill time and entries are flushed whenever the
+     * permission context (mmu_state) or address space changes, so a hit
+     * needs only the tag check plus one host load. */
+    u64 vpn = addr >> 12;
+    dtlb_ent_t *e = &cpu->dtlb_load[vpn & (TLB_SIZE - 1)];
+    if (__builtin_expect(e->addend && e->tag == vpn && (addr & 0xFFF) <= (u64)(0x1000 - size), 1)) {
+        load_result_t r;
+        r.exception = false; r.exc_code = 0; r.exc_val = 0;
+        u8 *p = e->addend + addr;
+        switch (size) {
+            case SIZE_BYTE:  r.value = *(u8 *)p;  break;
+            case SIZE_HALF:  r.value = *(u16 *)p; break;
+            case SIZE_WORD:  r.value = *(u32 *)p; break;
+            default:         r.value = *(u64 *)p; break;
+        }
+        return r;
+    }
+    mmu_result_t tr = mmu_translate(cpu, addr, ACCESS_LOAD);
     if (tr.exception) {
         return (load_result_t){ .value = 0, .exception = true, .exc_code = tr.exc_code, .exc_val = tr.exc_val };
     }
@@ -292,7 +314,21 @@ load_result_t cpu_load(cpu_t *cpu, u64 addr, int size) {
 }
 
 store_result_t cpu_store(cpu_t *cpu, u64 addr, u64 value, int size) {
-    mmu_result_t tr = mmu_translate_inline(cpu, addr, ACCESS_STORE);
+    /* Fast path: see cpu_load. Store entries additionally guarantee the
+     * PTE Dirty bit was handled at fill time. */
+    u64 vpn = addr >> 12;
+    dtlb_ent_t *e = &cpu->dtlb_store[vpn & (TLB_SIZE - 1)];
+    if (__builtin_expect(e->addend && e->tag == vpn && (addr & 0xFFF) <= (u64)(0x1000 - size), 1)) {
+        u8 *p = e->addend + addr;
+        switch (size) {
+            case SIZE_BYTE:  *(u8 *)p  = (u8)value;  break;
+            case SIZE_HALF:  *(u16 *)p = (u16)value; break;
+            case SIZE_WORD:  *(u32 *)p = (u32)value; break;
+            default:         *(u64 *)p = (u64)value; break;
+        }
+        return (store_result_t){0};
+    }
+    mmu_result_t tr = mmu_translate(cpu, addr, ACCESS_STORE);
     if (tr.exception) {
         return (store_result_t){ .exception = true, .exc_code = tr.exc_code, .exc_val = tr.exc_val };
     }
@@ -342,6 +378,7 @@ void cpu_load_binary(cpu_t *cpu, const u8 *data, u64 len) {
 /* ---- Instruction execution (forward declaration, defined in execute.c) ---- */
 extern void cpu_execute(cpu_t *cpu, u32 inst);
 extern void cpu_execute_compressed(cpu_t *cpu, u16 inst);
+extern int g_trace;
 
 /* ---- Update PLIC/interrupt signals ---- */
 static void cpu_update_devices(cpu_t *cpu) {
@@ -456,8 +493,7 @@ void cpu_step(cpu_t *cpu) {
         /* check for page boundary cross */
         if (__builtin_expect((pc & 0xFFF) <= 0xFFC, 1)) {
             inst = *(u32*)host_ptr;
-        } else {
-            /* cross-page 32-bit instruction */
+        } else {            /* cross-page 32-bit instruction */
             mmu_result_t tr2 = mmu_translate_inline(cpu, pc + 2, ACCESS_EXEC);
             if (tr2.exception) { cpu_take_trap(cpu, tr2.exc_code, tr2.exc_val, false); return; }
             load_result_t lr2 = bus_load(&cpu->bus, tr2.paddr, SIZE_HALF);
@@ -467,6 +503,13 @@ void cpu_step(cpu_t *cpu) {
     }
 
     cpu->pc += inst_len;
+    if (__builtin_expect(g_trace != 0, 0)) {
+        fprintf(stderr, "[trace] pc=%012llx len=%d inst=%08x a0=%llx a2=%llx a4=%llx a5=%llx sp=%llx\n",
+                (unsigned long long)pc, inst_len, inst,
+                (unsigned long long)cpu->regs[10], (unsigned long long)cpu->regs[12],
+                (unsigned long long)cpu->regs[14], (unsigned long long)cpu->regs[15],
+                (unsigned long long)cpu->regs[2]);
+    }
     if (inst_len == 2) cpu_execute_compressed(cpu, (u16)inst);
     else cpu_execute(cpu, inst);
 

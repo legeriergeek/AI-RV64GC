@@ -26,29 +26,19 @@ void dram_load_binary(dram_t *dram, const u8 *data, u64 len, u64 offset) {
 
 u64 dram_load(dram_t *dram, u64 addr, int size) {
     u64 val = 0;
+    /* memcpy compiles to a single unaligned load on x86 for these sizes */
     switch (size) {
         case SIZE_BYTE:
             val = dram->mem[addr];
             break;
         case SIZE_HALF:
-            val = (u64)dram->mem[addr]
-                | ((u64)dram->mem[addr + 1] << 8);
+            memcpy(&val, &dram->mem[addr], 2);
             break;
         case SIZE_WORD:
-            val = (u64)dram->mem[addr]
-                | ((u64)dram->mem[addr + 1] << 8)
-                | ((u64)dram->mem[addr + 2] << 16)
-                | ((u64)dram->mem[addr + 3] << 24);
+            memcpy(&val, &dram->mem[addr], 4);
             break;
         case SIZE_DWORD:
-            val = (u64)dram->mem[addr]
-                | ((u64)dram->mem[addr + 1] << 8)
-                | ((u64)dram->mem[addr + 2] << 16)
-                | ((u64)dram->mem[addr + 3] << 24)
-                | ((u64)dram->mem[addr + 4] << 32)
-                | ((u64)dram->mem[addr + 5] << 40)
-                | ((u64)dram->mem[addr + 6] << 48)
-                | ((u64)dram->mem[addr + 7] << 56);
+            memcpy(&val, &dram->mem[addr], 8);
             break;
     }
     return val;
@@ -60,24 +50,13 @@ void dram_store(dram_t *dram, u64 addr, u64 value, int size) {
             dram->mem[addr] = (u8)value;
             break;
         case SIZE_HALF:
-            dram->mem[addr]     = (u8)(value);
-            dram->mem[addr + 1] = (u8)(value >> 8);
+            memcpy(&dram->mem[addr], &value, 2);
             break;
         case SIZE_WORD:
-            dram->mem[addr]     = (u8)(value);
-            dram->mem[addr + 1] = (u8)(value >> 8);
-            dram->mem[addr + 2] = (u8)(value >> 16);
-            dram->mem[addr + 3] = (u8)(value >> 24);
+            memcpy(&dram->mem[addr], &value, 4);
             break;
         case SIZE_DWORD:
-            dram->mem[addr]     = (u8)(value);
-            dram->mem[addr + 1] = (u8)(value >> 8);
-            dram->mem[addr + 2] = (u8)(value >> 16);
-            dram->mem[addr + 3] = (u8)(value >> 24);
-            dram->mem[addr + 4] = (u8)(value >> 32);
-            dram->mem[addr + 5] = (u8)(value >> 40);
-            dram->mem[addr + 6] = (u8)(value >> 48);
-            dram->mem[addr + 7] = (u8)(value >> 56);
+            memcpy(&dram->mem[addr], &value, 8);
             break;
     }
 }

@@ -428,7 +428,11 @@ bool virtio_net_is_interrupting(virtio_net_t *vnet) {
 void virtio_net_poll(virtio_net_t *vnet, struct cpu *cpu) {
     if (vnet->tap_fd < 0) return;
 
-    /* Check if there are packets to deliver */
+    /* Lock-free peek: only take the mutex when packets are actually
+     * queued. rx_count is updated by the RX thread under mutex; an
+     * atomic load avoids a lock/unlock pair every 256 instructions. */
+    if (__atomic_load_n(&vnet->rx_count, __ATOMIC_RELAXED) <= 0) return;
+
     pthread_mutex_lock(&vnet->rx_lock);
     int count = vnet->rx_count;
     pthread_mutex_unlock(&vnet->rx_lock);

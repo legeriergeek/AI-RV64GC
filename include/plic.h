@@ -27,6 +27,9 @@ typedef struct {
     u32 enable[PLIC_MAX_CONTEXT][PLIC_MAX_SOURCE / 32];
     u32 threshold[PLIC_MAX_CONTEXT];
     u32 claim[PLIC_MAX_CONTEXT];
+    /* Summary: bit w set iff pending[w] != 0. Only touched by the main
+     * emulation thread (set_pending/claim), no locking needed. */
+    u32 pending_summary;
 } plic_t;
 
 void plic_init(plic_t *plic);

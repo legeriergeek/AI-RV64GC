@@ -92,13 +92,18 @@ void plic_store(plic_t *plic, u64 offset, u64 value, int size) {
 
 void plic_set_pending(plic_t *plic, int irq) {
     if (irq > 0 && irq < PLIC_MAX_SOURCE) {
-        plic->pending[irq / 32] |= (1U << (irq % 32));
+        u32 word = irq / 32;
+        u32 old = plic->pending[word];
+        plic->pending[word] = old | (1U << (irq % 32));
+        if (old == 0) plic->pending_summary |= (1U << word);
     }
 }
 
 void plic_clear_pending(plic_t *plic, int irq) {
     if (irq > 0 && irq < PLIC_MAX_SOURCE) {
-        plic->pending[irq / 32] &= ~(1U << (irq % 32));
+        u32 word = irq / 32;
+        plic->pending[word] &= ~(1U << (irq % 32));
+        if (plic->pending[word] == 0) plic->pending_summary &= ~(1U << word);
     }
 }
 
@@ -139,6 +144,10 @@ void plic_complete(plic_t *plic, int context, u32 irq) {
 }
 
 bool plic_is_interrupting(plic_t *plic, int context) {
+    /* Fast path: no interrupt source pending at all (the common case).
+     * The old code scanned all PLIC_MAX_SOURCE sources on every call. */
+    if (plic->pending_summary == 0) return false;
+
     for (int i = 1; i < PLIC_MAX_SOURCE; i++) {
         u32 word = i / 32;
         u32 bit  = i % 32;

@@ -5,6 +5,7 @@
 
 bool g_verbose = false;
 bool g_mips_report = false;
+int g_trace = 0;
 
 static void usage(const char *prog) {
     fprintf(stderr, "Usage: %s [options] <kernel.bin>\n", prog);
@@ -20,6 +21,7 @@ int main(int argc, char **argv) {
     setbuf(stdout, NULL);
     setbuf(stderr, NULL);
     srand(time(NULL));
+    g_trace = getenv("RVEMU_TRACE") != NULL;
 
     const char *disk_path = NULL;
     const char *initrd_path = NULL;
